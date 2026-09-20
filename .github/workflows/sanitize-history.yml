@@ -1,0 +1,39 @@
+name: Sanitize git history
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove hard-coded database URLs from history
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter '
+            for f in database.py backend/database.py; do
+              if [ -f "$f" ]; then
+                if grep -q "^DATABASE_URL = \"postgresql://" "$f"; then
+                  sed -i "/^DATABASE_URL = \"postgresql:\/\//c\\DATABASE_URL = os.getenv(\"DATABASE_URL\")" "$f"
+                  grep -q "^import os$" "$f" || sed -i "1iimport os" "$f"
+                fi
+              fi
+            done
+          ' -- --all
+
+          git for-each-ref --format="%(refname)" refs/original/ | xargs -r -n 1 git update-ref -d
+          git reflog expire --expire=now --all
+          git gc --prune=now
+          git push --force origin main
